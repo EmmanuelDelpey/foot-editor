@@ -1,0 +1,831 @@
+// Démarrage
+        initDemo();        // Event listeners unifiés PC/Mobile<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <title>Canvas Draggable Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            font-size: 2rem;
+        }
+
+        .instructions {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        canvas {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            background: #f8fafc;
+            cursor: grab;
+            touch-action: none;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .scale-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .scale-slider {
+            width: 100px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .scale-slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+        }
+
+        .info {
+            margin-top: 15px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Canvas Draggable Demo</h1>
+        
+        <div class="instructions">
+            <strong>💡 Instructions :</strong><br>
+            • <strong>Glisser</strong> : Cliquez et glissez pour déplacer<br>
+            • <strong>Double-clic</strong> : Envoyer au premier plan / arrière-plan<br>
+            • <strong>Redimensionner</strong> : Glissez les poignées bleues (8 points)<br>
+            • <strong>Scale</strong> : Ou utilisez le curseur ci-dessous<br>
+            • Optimisé pour mobile et desktop !
+        </div>
+
+        <canvas id="demoCanvas" width="600" height="400"></canvas>
+
+        <div class="controls">
+            <button class="btn" onclick="addElement('text')">+ Texte</button>
+            <button class="btn" onclick="addElement('rect')">+ Rectangle</button>
+            <button class="btn" onclick="addElement('circle')">+ Cercle</button>
+            
+            <div class="scale-control">
+                <span>📏 Taille:</span>
+                <input type="range" id="scaleSlider" class="scale-slider" 
+                       min="0.3" max="2.5" step="0.1" value="1.0">
+                <span id="scaleValue">100%</span>
+            </div>
+            
+            <button class="btn" onclick="resetCanvas()">🔄 Reset</button>
+        </div>
+
+        <div class="controls" style="margin-top: 10px;">
+            <button class="btn btn-export" onclick="exportImage('png')">📱 Export PNG</button>
+            <button class="btn btn-export" onclick="exportImage('jpeg')">📸 Export JPEG</button>
+            <button class="btn btn-hd" onclick="exportImageHD()">🎬 Export HD (4K)</button>
+        </div>
+
+        <div class="info">
+            Démo : Éléments déplaçables en Canvas pur - PC & Mobile compatible
+        </div>
+    </div>
+
+    <script>
+        // Variables globales
+        const canvas = document.getElementById('demoCanvas');
+        const ctx = canvas.getContext('2d');
+        const scaleSlider = document.getElementById('scaleSlider');
+        const scaleValue = document.getElementById('scaleValue');
+        let elements = [];
+        let dragElement = null;
+        let selectedElement = null;
+        let resizeElement = null;
+        let resizeHandle = null;
+        let dragOffset = { x: 0, y: 0 };
+        let isDragging = false;
+        let isResizing = false;
+        let lastClickTime = 0;
+
+        // Constantes pour mobile
+        const SELECTION_PADDING = 20;
+        const CORNER_SIZE = 18;
+        const TOUCH_ZONE = 25; // Zone de détection du touch
+
+        // Structure d'un élément draggable
+        class DraggableElement {
+            constructor(type, x, y) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.width = 120;
+                this.height = 60;
+                this.scale = 1.0;
+                this.color = this.randomColor();
+                this.text = type === 'text' ? 'Texte' : '';
+                this.selected = false;
+                this.zIndex = elements.length; // Position dans la pile
+            }
+
+            randomColor() {
+                const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            // Vérifier si un point est dans l'élément (en tenant compte du scale)
+            containsPoint(x, y) {
+                const scaledWidth = this.width * this.scale;
+                const scaledHeight = this.height * this.scale;
+                const offsetX = (scaledWidth - this.width) / 2;
+                const offsetY = (scaledHeight - this.height) / 2;
+                
+                if (this.type === 'circle') {
+                    const centerX = this.x + scaledWidth / 2;
+                    const centerY = this.y + scaledHeight / 2;
+                    const radius = Math.min(scaledWidth, scaledHeight) / 2;
+                    const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+                    return distance <= radius;
+                } else {
+                    return x >= this.x - offsetX && x <= this.x - offsetX + scaledWidth &&
+                           y >= this.y - offsetY && y <= this.y - offsetY + scaledHeight;
+                }
+            }
+
+            // Dessiner l'élément
+            draw(ctx) {
+                ctx.save();
+
+                // Calculer les dimensions avec scale
+                const scaledWidth = this.width * this.scale;
+                const scaledHeight = this.height * this.scale;
+                const offsetX = (scaledWidth - this.width) / 2;
+                const offsetY = (scaledHeight - this.height) / 2;
+
+                // Ombre si sélectionné
+                if (this.selected) {
+                    ctx.shadowColor = 'rgba(59, 130, 246, 0.8)';
+                    ctx.shadowBlur = 15;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                }
+
+                ctx.fillStyle = this.color;
+
+                switch (this.type) {
+                    case 'rect':
+                        ctx.fillRect(this.x - offsetX, this.y - offsetY, scaledWidth, scaledHeight);
+                        break;
+                    
+                    case 'circle':
+                        const centerX = this.x + scaledWidth / 2;
+                        const centerY = this.y + scaledHeight / 2;
+                        const radius = Math.min(scaledWidth, scaledHeight) / 2;
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                        break;
+                    
+                    case 'text':
+                        // Background pour le texte
+                        ctx.fillRect(this.x - offsetX, this.y - offsetY, scaledWidth, scaledHeight);
+                        
+                        // Texte avec taille adaptée au scale
+                        ctx.fillStyle = 'white';
+                        ctx.font = `bold ${16 * this.scale}px Arial`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(
+                            this.text, 
+                            this.x + scaledWidth / 2 - offsetX, 
+                            this.y + scaledHeight / 2 - offsetY
+                        );
+                        break;
+                }
+
+                ctx.restore();
+            }
+
+            // Dessiner les contrôles de sélection séparément
+            drawSelectionControls(ctx) {
+                if (!this.selected) return;
+
+                ctx.save();
+
+                const scaledWidth = this.width * this.scale;
+                const scaledHeight = this.height * this.scale;
+                const offsetX = (scaledWidth - this.width) / 2;
+                const offsetY = (scaledHeight - this.height) / 2;
+
+                // Cadre de sélection élargi
+                const selectionX = this.x - offsetX - SELECTION_PADDING;
+                const selectionY = this.y - offsetY - SELECTION_PADDING;
+                const selectionW = scaledWidth + SELECTION_PADDING * 2;
+                const selectionH = scaledHeight + SELECTION_PADDING * 2;
+
+                // Bordure de sélection
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.strokeRect(selectionX, selectionY, selectionW, selectionH);
+                ctx.setLineDash([]);
+
+                // Poignées de redimensionnement (8 points)
+                const handles = this.getResizeHandles();
+                handles.forEach((handle, index) => {
+                    // Ombre pour les poignées
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                    ctx.shadowBlur = 4;
+                    ctx.shadowOffsetX = 1;
+                    ctx.shadowOffsetY = 1;
+
+                    // Poignée
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.fillRect(
+                        handle.x - CORNER_SIZE / 2, 
+                        handle.y - CORNER_SIZE / 2, 
+                        CORNER_SIZE, 
+                        CORNER_SIZE
+                    );
+
+                    // Bordure blanche
+                    ctx.shadowColor = 'transparent';
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(
+                        handle.x - CORNER_SIZE / 2, 
+                        handle.y - CORNER_SIZE / 2, 
+                        CORNER_SIZE, 
+                        CORNER_SIZE
+                    );
+                });
+
+                // Affichage des infos
+                ctx.shadowColor = 'transparent';
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.95)';
+                ctx.fillRect(selectionX, selectionY - 35, 120, 25);
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${this.type} - ${Math.round(this.scale * 100)}%`, selectionX + 5, selectionY - 18);
+
+                ctx.restore();
+            }
+
+            // Obtenir les positions des poignées de redimensionnement
+            getResizeHandles() {
+                const scaledWidth = this.width * this.scale;
+                const scaledHeight = this.height * this.scale;
+                const offsetX = (scaledWidth - this.width) / 2;
+                const offsetY = (scaledHeight - this.height) / 2;
+
+                const left = this.x - offsetX - SELECTION_PADDING;
+                const right = this.x - offsetX + scaledWidth + SELECTION_PADDING;
+                const top = this.y - offsetY - SELECTION_PADDING;
+                const bottom = this.y - offsetY + scaledHeight + SELECTION_PADDING;
+                const centerX = left + (right - left) / 2;
+                const centerY = top + (bottom - top) / 2;
+
+                return [
+                    { x: left, y: top, cursor: 'nw-resize', type: 'nw' },           // Top-left
+                    { x: centerX, y: top, cursor: 'n-resize', type: 'n' },         // Top-center
+                    { x: right, y: top, cursor: 'ne-resize', type: 'ne' },         // Top-right
+                    { x: right, y: centerY, cursor: 'e-resize', type: 'e' },       // Middle-right
+                    { x: right, y: bottom, cursor: 'se-resize', type: 'se' },      // Bottom-right
+                    { x: centerX, y: bottom, cursor: 's-resize', type: 's' },      // Bottom-center
+                    { x: left, y: bottom, cursor: 'sw-resize', type: 'sw' },       // Bottom-left
+                    { x: left, y: centerY, cursor: 'w-resize', type: 'w' }         // Middle-left
+                ];
+            }
+        }
+
+        // Initialisation avec quelques éléments de démo
+        function initDemo() {
+            elements = [
+                new DraggableElement('text', 50, 50),
+                new DraggableElement('rect', 200, 100),
+                new DraggableElement('circle', 400, 150)
+            ];
+            elements[0].text = 'TITRE';
+            render();
+        }
+
+        // Rendu de tout le canvas
+        function render() {
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Background pattern
+            ctx.fillStyle = '#f1f5f9';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Grid légère
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Dessiner tous les éléments
+            elements.forEach(element => element.draw(ctx));
+
+            // Dessiner les contrôles de sélection par-dessus
+            elements.forEach(element => {
+                if (element.selected) {
+                    element.drawSelectionControls(ctx);
+                }
+            });
+
+            // Info de débogage
+            if (selectedElement) {
+                const mode = isResizing ? 'RESIZE' : (isDragging ? 'DRAG' : 'SELECTED');
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(10, 10, 320, 50);
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText(`${mode}: ${selectedElement.type} | Scale: ${Math.round(selectedElement.scale * 100)}%`, 15, 28);
+                ctx.fillText(`8 poignées de redimensionnement | Z-index: ${elements.indexOf(selectedElement) + 1}`, 15, 45);
+            }
+        }
+
+        // Gestion des événements de souris/touch
+        function getEventPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            return {
+                x: (clientX - rect.left) * (canvas.width / rect.width),
+                y: (clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
+        // Détecter sur quelle poignée on clique
+        function getResizeHandle(pos, element) {
+            if (!element || !element.selected) return null;
+            
+            const handles = element.getResizeHandles();
+            for (let handle of handles) {
+                const distance = Math.sqrt(
+                    Math.pow(pos.x - handle.x, 2) + Math.pow(pos.y - handle.y, 2)
+                );
+                if (distance <= TOUCH_ZONE) {
+                    return handle;
+                }
+            }
+            return null;
+        }
+
+        function handleStart(e) {
+            e.preventDefault();
+            const pos = getEventPos(e);
+            const now = Date.now();
+            const isDoubleClick = (now - lastClickTime) < 300;
+            lastClickTime = now;
+            
+            // D'abord, vérifier si on clique sur une poignée de resize
+            if (selectedElement) {
+                const handle = getResizeHandle(pos, selectedElement);
+                if (handle) {
+                    isResizing = true;
+                    resizeElement = selectedElement;
+                    resizeHandle = handle;
+                    canvas.style.cursor = handle.cursor;
+                    return;
+                }
+            }
+            
+            // Chercher l'élément cliqué (en partant du dernier = au-dessus)
+            for (let i = elements.length - 1; i >= 0; i--) {
+                if (elements[i].containsPoint(pos.x, pos.y)) {
+                    const clickedElement = elements[i];
+                    
+                    if (isDoubleClick && selectedElement === clickedElement) {
+                        // Double-clic : basculer z-index
+                        toggleZIndex(clickedElement);
+                        return;
+                    }
+                    
+                    // Simple clic : sélection et drag
+                    selectElement(clickedElement);
+                    
+                    dragElement = clickedElement;
+                    const scaledWidth = clickedElement.width * clickedElement.scale;
+                    const scaledHeight = clickedElement.height * clickedElement.scale;
+                    const offsetX = (scaledWidth - clickedElement.width) / 2;
+                    const offsetY = (scaledHeight - clickedElement.height) / 2;
+                    
+                    dragOffset.x = pos.x - (clickedElement.x - offsetX);
+                    dragOffset.y = pos.y - (clickedElement.y - offsetY);
+                    isDragging = true;
+                    
+                    // Mettre l'élément au premier plan
+                    elements.splice(i, 1);
+                    elements.push(dragElement);
+                    
+                    canvas.style.cursor = 'grabbing';
+                    render();
+                    break;
+                }
+            }
+            
+            // Clic dans le vide = désélection
+            if (!dragElement && !isResizing) {
+                selectElement(null);
+            }
+        }
+
+        function handleMove(e) {
+            e.preventDefault();
+            const pos = getEventPos(e);
+
+            // Mode resize
+            if (isResizing && resizeElement && resizeHandle) {
+                performResize(pos);
+                return;
+            }
+
+            // Mode drag
+            if (isDragging && dragElement) {
+                const scaledWidth = dragElement.width * dragElement.scale;
+                const scaledHeight = dragElement.height * dragElement.scale;
+                const offsetX = (scaledWidth - dragElement.width) / 2;
+                const offsetY = (scaledHeight - dragElement.height) / 2;
+                
+                // Nouvelle position avec contraintes
+                const newX = pos.x - dragOffset.x;
+                const newY = pos.y - dragOffset.y;
+                
+                dragElement.x = Math.max(offsetX, Math.min(canvas.width - scaledWidth + offsetX, newX));
+                dragElement.y = Math.max(offsetY, Math.min(canvas.height - scaledHeight + offsetY, newY));
+                
+                render();
+                return;
+            }
+
+            // Changement de curseur au survol des poignées
+            if (selectedElement && !isDragging && !isResizing) {
+                const handle = getResizeHandle(pos, selectedElement);
+                canvas.style.cursor = handle ? handle.cursor : 'grab';
+            }
+        }
+
+        function performResize(pos) {
+            if (!resizeElement || !resizeHandle) return;
+
+            const originalWidth = resizeElement.width;
+            const originalHeight = resizeElement.height;
+            const originalScale = resizeElement.scale;
+            
+            // Calculer le nouveau scale basé sur la direction du resize
+            const centerX = resizeElement.x + (originalWidth * originalScale) / 2;
+            const centerY = resizeElement.y + (originalHeight * originalScale) / 2;
+            
+            let newScale = originalScale;
+            
+            switch (resizeHandle.type) {
+                case 'se': // Bottom-right - resize proportionnel
+                    const distanceFromCenter = Math.sqrt(
+                        Math.pow(pos.x - centerX, 2) + Math.pow(pos.y - centerY, 2)
+                    );
+                    const originalDistance = Math.sqrt(
+                        Math.pow(originalWidth * originalScale / 2, 2) + 
+                        Math.pow(originalHeight * originalScale / 2, 2)
+                    );
+                    newScale = Math.max(0.2, Math.min(3.0, (distanceFromCenter / originalDistance) * originalScale));
+                    break;
+                    
+                case 'e': // Right - resize horizontal
+                    const deltaX = pos.x - centerX;
+                    newScale = Math.max(0.2, Math.min(3.0, (deltaX * 2) / originalWidth));
+                    break;
+                    
+                case 's': // Bottom - resize vertical  
+                    const deltaY = pos.y - centerY;
+                    newScale = Math.max(0.2, Math.min(3.0, (deltaY * 2) / originalHeight));
+                    break;
+                    
+                default:
+                    // Autres directions - resize proportionnel simplifié
+                    const avgDelta = (Math.abs(pos.x - centerX) + Math.abs(pos.y - centerY)) / 2;
+                    const avgOriginal = (originalWidth + originalHeight) / 4 * originalScale;
+                    newScale = Math.max(0.2, Math.min(3.0, avgDelta / avgOriginal * originalScale));
+            }
+            
+            resizeElement.scale = newScale;
+            
+            // Mettre à jour le slider
+            scaleSlider.value = newScale;
+            updateScaleDisplay(newScale);
+            
+            render();
+        }
+
+        function handleEnd(e) {
+            if (isDragging || isResizing) {
+                isDragging = false;
+                isResizing = false;
+                dragElement = null;
+                resizeElement = null;
+                resizeHandle = null;
+                canvas.style.cursor = 'grab';
+            }
+        }
+
+        // Fonctions de gestion des éléments
+        function selectElement(element) {
+            // Désélectionner tous
+            elements.forEach(el => el.selected = false);
+            selectedElement = element;
+            
+            if (element) {
+                element.selected = true;
+                // Mettre à jour le slider
+                scaleSlider.value = element.scale;
+                updateScaleDisplay(element.scale);
+            } else {
+                scaleSlider.value = 1.0;
+                updateScaleDisplay(1.0);
+            }
+            render();
+        }
+
+        function toggleZIndex(element) {
+            const currentIndex = elements.indexOf(element);
+            if (currentIndex === elements.length - 1) {
+                // Au premier plan → envoyer à l'arrière
+                elements.splice(currentIndex, 1);
+                elements.unshift(element);
+            } else {
+                // Pas au premier plan → envoyer au premier plan
+                elements.splice(currentIndex, 1);
+                elements.push(element);
+            }
+            render();
+        }
+
+        function updateScaleDisplay(scale) {
+            scaleValue.textContent = Math.round(scale * 100) + '%';
+        }
+
+        // Event listener pour le slider de scale
+        scaleSlider.addEventListener('input', function() {
+            if (selectedElement) {
+                selectedElement.scale = parseFloat(this.value);
+                updateScaleDisplay(selectedElement.scale);
+                render();
+            }
+        });
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+
+        // Support tactile
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
+
+        // Fonctions des boutons
+        function addElement(type) {
+            const x = Math.random() * (canvas.width - 120);
+            const y = Math.random() * (canvas.height - 60);
+            const element = new DraggableElement(type, x, y);
+            
+            if (type === 'text') {
+                element.text = `Texte ${elements.filter(e => e.type === 'text').length + 1}`;
+            }
+            
+            elements.push(element);
+            render();
+        }
+
+        function resetCanvas() {
+            elements = [];
+            render();
+        }
+
+        // Fonctions d'export d'images
+        function exportImage(format) {
+            // Créer un canvas temporaire sans les contrôles de sélection
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = canvas.width;
+            exportCanvas.height = canvas.height;
+            const exportCtx = exportCanvas.getContext('2d');
+
+            // Reproduire le rendu sans les contrôles
+            renderForExport(exportCtx, exportCanvas.width, exportCanvas.height);
+
+            // Définir le type MIME et la qualité
+            let mimeType, quality, extension;
+            if (format === 'jpeg') {
+                mimeType = 'image/jpeg';
+                quality = 0.9; // 90% de qualité
+                extension = 'jpg';
+            } else {
+                mimeType = 'image/png';
+                quality = 1.0; // PNG est sans perte
+                extension = 'png';
+            }
+
+            // Générer le nom de fichier avec timestamp
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+            const filename = `canvas-creation-${timestamp}.${extension}`;
+
+            // Créer et déclencher le téléchargement
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = exportCanvas.toDataURL(mimeType, quality);
+            
+            // Animation du bouton pendant l'export
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '⏳ Export...';
+            button.disabled = true;
+            
+            setTimeout(() => {
+                link.click();
+                button.textContent = originalText;
+                button.disabled = false;
+            }, 100);
+        }
+
+        function exportImageHD() {
+            // Export en 4K (4x la résolution)
+            const hdCanvas = document.createElement('canvas');
+            const scaleFactor = 4;
+            hdCanvas.width = canvas.width * scaleFactor;
+            hdCanvas.height = canvas.height * scaleFactor;
+            const hdCtx = hdCanvas.getContext('2d');
+            
+            // Mise à l'échelle pour la haute résolution
+            hdCtx.scale(scaleFactor, scaleFactor);
+            
+            // Rendu HD
+            renderForExport(hdCtx, canvas.width, canvas.height);
+            
+            // Export en JPEG haute qualité
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+            const filename = `canvas-creation-4K-${timestamp}.jpg`;
+            
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = hdCanvas.toDataURL('image/jpeg', 0.95); // 95% qualité pour HD
+            
+            // Animation du bouton
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '🎬 Génération 4K...';
+            button.disabled = true;
+            
+            setTimeout(() => {
+                link.click();
+                button.textContent = originalText;
+                button.disabled = false;
+                
+                // Notification de succès
+                showNotification(`Export 4K réussi ! (${hdCanvas.width}x${hdCanvas.height}px)`);
+            }, 200);
+        }
+
+        function renderForExport(ctx, width, height) {
+            // Clear
+            ctx.clearRect(0, 0, width, height);
+
+            // Background pattern (comme dans le rendu principal)
+            ctx.fillStyle = '#f1f5f9';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Grid légère (optionnelle pour l'export)
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < width; x += 30) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < height; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // Dessiner tous les éléments SANS les contrôles de sélection
+            elements.forEach(element => {
+                const wasSelected = element.selected;
+                element.selected = false; // Temporairement désélectionner
+                element.draw(ctx);
+                element.selected = wasSelected; // Restaurer l'état
+            });
+        }
+
+        function showNotification(message) {
+            // Créer une notification temporaire
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #10b981;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                font-weight: 600;
+                z-index: 10000;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transform: translateX(400px);
+                transition: transform 0.3s ease;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Animation d'entrée
+            setTimeout(() => {
+                notification.style.transform = 'translateX(0)';
+            }, 10);
+            
+            // Suppression automatique
+            setTimeout(() => {
+                notification.style.transform = 'translateX(400px)';
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
