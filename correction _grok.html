@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Poster Generator</title>
+    <style>
+        .container { text-align: center; font-family: Arial, sans-serif; }
+        canvas { border: 1px solid #ccc; background: #f1f5f9; cursor: grab; touch-action: none; }
+        canvas:active { cursor: grabbing; }
+        .controls { margin-top: 20px; display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        .scale-control { display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.1); padding: 10px 15px; border-radius: 5px; }
+        .scale-slider { width: 100px; height: 5px; background: rgba(255, 255, 255, 0.3); border-radius: 5px; outline: none; cursor: pointer; }
+        .scale-slider::-webkit-slider-thumb { appearance: none; width: 15px; height: 15px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
+        .btn { padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease; }
+        .btn:hover { background: #2563eb; transform: translateY(-2px); }
+        .info { margin-top: 15px; font-size: 12px; opacity: 0.8; }
+        .notification { position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 15px 20px; border-radius: 8px; font-weight: 600; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transform: translateX(400px); transition: transform 0.3s ease; }
+        #image-upload { margin-top: 10px; }
+    </style>
+</head>
+<body class="container">
+    <h1>🎨 Poster Generator</h1>
+    <div class="instructions">
+        <strong>💡 Instructions :</strong>
+        <ul>
+            <li>Glisser : Cliquez et glissez pour déplacer</li>
+            <li>Double-clic : Envoyer au premier plan / arrière-plan</li>
+            <li>Redimensionner : Glissez les poignées bleues (coins)</li>
+            <li>Scale : Utilisez le curseur ci-dessous</li>
+            <li>Images : Uploadez via le bouton ci-dessous</li>
+            <li>Optimisé pour mobile et desktop !</li>
+        </ul>
+    </div>
+    <canvas id="democanvas" width="800" height="600"></canvas>
+    <div class="controls">
+        <button class="btn" onclick="addElement('text')">+ Texte</button>
+        <button class="btn" onclick="addElement('rectangle')">+ Rectangle</button>
+        <button class="btn" onclick="addElement('circle')">+ Cercle</button>
+        <div class="scale-control">
+            <span>📏 Taille:</span>
+            <input type="range" id="scaleslider" class="scale-slider" min="0.3" max="2.5" step="0.1" value="1.0">
+            <span id="scalevalue">100%</span>
+        </div>
+        <button class="btn" onclick="resetCanvas()">🔄 Reset</button>
+    </div>
+    <div class="controls" style="margin-top: 10px;">
+        <button class="btn btn-export" onclick="exportImage('png')">📱 Export PNG</button>
+        <button class="btn btn-export" onclick="exportImage('jpeg')">📸 Export JPEG</button>
+        <button class="btn btn-hd" onclick="exportImageHD()">🎬 Export HD (4K)</button>
+    </div>
+    <div id="image-upload">
+        <label for="image-input" class="btn">📷 Ajouter Image</label>
+        <input type="file" id="image-input" accept="image/*" style="display: none;" onchange="addImage(this.files[0])">
+    </div>
+    <div class="info">
+        Démo : Éditeur de posters en Canvas pur - PC & Mobile compatible
+    </div>
+    <label style="margin-top: 10px; display: block;">
+        <input type="checkbox" id="proportional-resize" checked> Redimensionnement proportionnel
+    </label>
+
+    <script>
+        const canvas = document.getElementById("democanvas");
+        if (!canvas || !canvas.getContext) {
+            alert("Erreur : Le canvas n'est pas supporté par ce navigateur.");
+            throw new Error("Canvas non supporté");
+        }
+        const ctx = canvas.getContext("2d");
+        const scaleSlider = document.getElementById("scaleslider");
+        const scaleValue = document.getElementById("scalevalue");
+        let elements = [];
+        let dragElement = null;
+        let selectedElement = null;
+        let resizeElement = null;
+        let currentHandle = null;
+        let dragOffset = { x: 0, y: 0 };
+        let isDragging = false;
+        let lastClickTime = 0;
+        let lastRender = 0;
+        let lastX = 0;
+        let lastY = 0;
+
+        class DraggableElement {
+            constructor(type, x, y) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.width = type === 'text' ? 100 : 60;
+                this.height = type === 'text' ? 40 : 60;
+                this.scale = 1;
+                this.zIndex = elements.length;
+                this.selected = false;
+                this.color = ['#3b82f6', '#ef4444', '#10b981'][Math.floor(Math.random() * 3)];
+                if (type === 'text') {
+                    this.text = `Texte ${elements.filter(e => e.type === 'text').length + 1}`;
+                }
+            }
+
+            getBoundingBox(ctx) {
+                const scaledWidth = this.width * this.scale;
+                const scaledHeight = this.height * this.scale;
+                let x, y, width, height;
+
+                if (this.type === 'text') {
+                    ctx.font = `${scaledHeight}px Arial`;
+                    const metrics = ctx.measureText(this.text);
+                    width = metrics.width;
+                    height = scaledHeight; // Approximation de la hauteur
+                    x = this.x - width / 2;
+                    y = this.y - height / 2;
+                } else if (this.type === 'circle') {
+                    const radius = Math.min(scaledWidth, scaledHeight) / 2;
+                    width = radius * 2;
+                    height = radius * 2;
+                    x = this.x - radius;
+                    y = this.y - radius;
+                } else {
+                    const offsetX = (scaledWidth - this.width) / 2;
+                    const offsetY = (scaledHeight - this.height) / 2;
+                    x = this.x - offsetX;
+                    y = this.y - offsetY;
+                    width = scaledWidth;
+                    height = scaledHeight;
+                }
+
+                return { x, y, width, height };
+            }
+
+            draw(ctx) {
+                const { x, y, width, height } = this.getBoundingBox(ctx);
+                ctx.fillStyle = this.color;
+
+                try {
+                    if (this.type === 'rectangle') {
+                        ctx.fillRect(x, y, width, height);
+                    } else if (this.type === 'circle') {
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, Math.min(width, height) / 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (this.type === 'text') {
+                        ctx.font = `${height}px Arial`;
+                        ctx.fillText(this.text, x, y + height);
+                    } else if (this.type === 'image' && this.image) {
+                        ctx.drawImage(this.image, x, y, width, height);
+                    }
+                } catch (err) {
+                    console.error('Erreur lors du rendu de l’élément:', this.type, err);
+                }
+
+                if (this.selected) {
+                    ctx.strokeStyle = 'blue';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+                    const handleSize = 8;
+                    const handleOffset = 10;
+                    const handles = [
+                        [x - handleOffset, y - handleOffset], // top-left
+                        [x + width + handleOffset, y - handleOffset], // top-right
+                        [x + width + handleOffset, y + height + handleOffset], // bottom-right
+                        [x - handleOffset, y + height + handleOffset], // bottom-left
+                    ];
+                    ctx.fillStyle = 'blue';
+                    handles.forEach(([hx, hy]) => {
+                        ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+                    });
+                }
+            }
+
+            isPointInside(x, y, ctx) {
+                const { x: bx, y: by, width, height } = this.getBoundingBox(ctx);
+                if (this.type === 'circle') {
+                    const centerX = bx + width / 2;
+                    const centerY = by + height / 2;
+                    const radius = Math.min(width, height) / 2;
+                    const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+                    return distance <= radius;
+                }
+                return x >= bx && x <= bx + width && y >= by && y <= by + height;
+            }
+        }
+
+        function getEventPosition(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || (e.touches && e.touches[0]?.clientX) || 0) - rect.left;
+            const y = (e.clientY || (e.touches && e.touches[0]?.clientY) || 0) - rect.top;
+            return { x, y };
+        }
+
+        function getHandleAtPoint(x, y, element, ctx) {
+            const { x: bx, y: by, width, height } = element.getBoundingBox(ctx);
+            const handleSize = 8;
+            const handleOffset = 10;
+            const hitRadius = 10; // Zone d’influence élargie
+            const handles = [
+                { name: 'top-left', x: bx - handleOffset, y: by - handleOffset },
+                { name: 'top-right', x: bx + width + handleOffset, y: by - handleOffset },
+                { name: 'bottom-right', x: bx + width + handleOffset, y: by + height + handleOffset },
+                { name: 'bottom-left', x: bx - handleOffset, y: by + height + handleOffset },
+            ];
+            return handles.find(h => Math.abs(x - h.x) < hitRadius && Math.abs(y - h.y) < hitRadius)?.name;
+        }
+
+        function handleStart(e) {
+            e.preventDefault();
+            const pos = getEventPosition(e);
+            lastX = pos.x;
+            lastY = pos.y;
+            const now = Date.now();
+
+            if (now - lastClickTime < 300 && selectedElement) {
+                const maxZ = Math.max(...elements.map(e => e.zIndex), 0);
+                selectedElement.zIndex = selectedElement.zIndex === maxZ ? 0 : maxZ + 1;
+                lastClickTime = now;
+                render();
+                return;
+            }
+            lastClickTime = now;
+
+            if (selectedElement) {
+                currentHandle = getHandleAtPoint(pos.x, pos.y, selectedElement, ctx);
+                if (currentHandle) {
+                    resizeElement = selectedElement;
+                    isDragging = false;
+                    render();
+                    return;
+                }
+            }
+
+            let newSelectedElement = elements.slice().reverse().find(el => {
+                const handle = getHandleAtPoint(pos.x, pos.y, el, ctx);
+                if (handle) {
+                    currentHandle = handle;
+                    resizeElement = el;
+                    return true;
+                }
+                return false;
+            });
+
+            if (!newSelectedElement) {
+                newSelectedElement = elements.slice().reverse().find(el => el.isPointInside(pos.x, pos.y, ctx));
+                if (newSelectedElement) {
+                    dragElement = newSelectedElement;
+                    dragOffset = { x: pos.x - newSelectedElement.x, y: pos.y - newSelectedElement.y };
+                    isDragging = true;
+                    currentHandle = null;
+                    resizeElement = null;
+                } else {
+                    selectedElement = null;
+                    elements.forEach(el => el.selected = false);
+                }
+            }
+
+            if (newSelectedElement) {
+                selectedElement = newSelectedElement;
+                elements.forEach(el => el.selected = el === selectedElement);
+            }
+
+            render();
+        }
+
+        function handleMove(e) {
+            e.preventDefault();
+            const pos = getEventPosition(e);
+            const dx = pos.x - lastX;
+            const dy = pos.y - lastY;
+            const proportional = document.getElementById('proportional-resize')?.checked || false;
+
+            if (resizeElement && currentHandle) {
+                const aspectRatio = resizeElement.width / resizeElement.height;
+                const { x: oldX, y: oldY } = resizeElement.getBoundingBox(ctx);
+                let newWidth, newHeight, deltaX, deltaY;
+
+                if (proportional) {
+                    if (currentHandle === 'top-left') {
+                        newWidth = Math.max(10, resizeElement.width - dx);
+                        newHeight = newWidth / aspectRatio;
+                        deltaX = resizeElement.width - newWidth;
+                        deltaY = resizeElement.height - newHeight;
+                    } else if (currentHandle === 'top-right') {
+                        newWidth = Math.max(10, resizeElement.width + dx);
+                        newHeight = newWidth / aspectRatio;
+                        deltaX = 0;
+                        deltaY = resizeElement.height - newHeight;
+                    } else if (currentHandle === 'bottom-right') {
+                        newWidth = Math.max(10, resizeElement.width + dx);
+                        newHeight = newWidth / aspectRatio;
+                        deltaX = 0;
+                        deltaY = 0;
+                    } else if (currentHandle === 'bottom-left') {
+                        newWidth = Math.max(10, resizeElement.width - dx);
+                        newHeight = newWidth / aspectRatio;
+                        deltaX = resizeElement.width - newWidth;
+                        deltaY = 0;
+                    }
+                    resizeElement.width = newWidth;
+                    resizeElement.height = newHeight;
+                    resizeElement.x += deltaX / 2;
+                    resizeElement.y += deltaY / 2;
+                } else {
+                    if (currentHandle === 'top-left') {
+                        newWidth = Math.max(10, resizeElement.width - dx);
+                        newHeight = Math.max(10, resizeElement.height - dy);
+                        deltaX = resizeElement.width - newWidth;
+                        deltaY = resizeElement.height - newHeight;
+                    } else if (currentHandle === 'top-right') {
+                        newWidth = Math.max(10, resizeElement.width + dx);
+                        newHeight = Math.max(10, resizeElement.height - dy);
+                        deltaX = 0;
+                        deltaY = resizeElement.height - newHeight;
+                    } else if (currentHandle === 'bottom-right') {
+                        newWidth = Math.max(10, resizeElement.width + dx);
+                        newHeight = Math.max(10, resizeElement.height + dy);
+                        deltaX = 0;
+                        deltaY = 0;
+                    } else if (currentHandle === 'bottom-left') {
+                        newWidth = Math.max(10, resizeElement.width - dx);
+                        newHeight = Math.max(10, resizeElement.height + dy);
+                        deltaX = resizeElement.width - newWidth;
+                        deltaY = 0;
+                    }
+                    resizeElement.width = newWidth;
+                    resizeElement.height = newHeight;
+                    resizeElement.x += deltaX / 2;
+                    resizeElement.y += deltaY / 2;
+                }
+                lastX = pos.x;
+                lastY = pos.y;
+                render();
+            } else if (dragElement) {
+                dragElement.x = pos.x - dragOffset.x;
+                dragElement.y = pos.y - dragOffset.y;
+                render();
+            }
+            lastX = pos.x;
+            lastY = pos.y;
+        }
+
+        function handleEnd() {
+            dragElement = null;
+            resizeElement = null;
+            currentHandle = null;
+            isDragging = false;
+        }
+
+        function updateScaleDisplay(scale) {
+            if (scaleValue) {
+                scaleValue.textContent = `${Math.round(scale * 100)}%`;
+            }
+        }
+
+        scaleSlider.addEventListener('input', () => {
+            if (selectedElement) {
+                selectedElement.scale = parseFloat(scaleSlider.value) || 1;
+                updateScaleDisplay(selectedElement.scale);
+                render();
+            }
+        });
+
+        function addElement(type) {
+            const x = Math.random() * (canvas.width - 60);
+            const y = Math.random() * (canvas.height - 60);
+            const element = new DraggableElement(type, x, y);
+            elements.push(element);
+            render();
+        }
+
+        function addImage(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const img = new Image();
+                img.onload = function () {
+                    const x = Math.random() * (canvas.width - 60);
+                    const y = Math.random() * (canvas.height - 60);
+                    const element = new DraggableElement('image', x, y);
+                    element.image = img;
+                    element.width = Math.min(img.width, canvas.width / 2);
+                    element.height = Math.min(img.height, canvas.height / 2);
+                    elements.push(element);
+                    render();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function resetCanvas() {
+            elements = [];
+            selectedElement = null;
+            render();
+        }
+
+        function exportImage(format) {
+            try {
+                const link = document.createElement('a');
+                link.download = `poster.${format}`;
+                link.href = canvas.toDataURL(`image/${format}`, 0.95);
+                link.click();
+                showNotification(`Export ${format.toUpperCase()} réussi !`);
+            } catch (err) {
+                console.error('Erreur lors de l’exportation:', err);
+                showNotification('Erreur lors de l’exportation');
+            }
+        }
+
+        function exportImageHD() {
+            try {
+                const hdCanvas = document.createElement('canvas');
+                hdCanvas.width = 3840;
+                hdCanvas.height = 2160;
+                const hdCtx = hdCanvas.getContext('2d');
+                renderForExport(hdCtx, hdCanvas.width, hdCanvas.height);
+                const link = document.createElement('a');
+                link.download = `poster-4k.jpg`;
+                link.href = hdCanvas.toDataURL('image/jpeg', 0.95);
+                link.click();
+                showNotification(`Export 4K réussi ! (${hdCanvas.width} x ${hdCanvas.height})`);
+            } catch (err) {
+                console.error('Erreur lors de l’exportation 4K:', err);
+                showNotification('Erreur lors de l’exportation 4K');
+            }
+        }
+
+        function renderForExport(ctx, width, height) {
+            ctx.fillStyle = '#f1f5f9';
+            ctx.fillRect(0, 0, width, height);
+            const scaleFactor = width / canvas.width;
+            elements.forEach(element => {
+                const wasSelected = element.selected;
+                element.selected = false;
+                const scaledElement = {
+                    ...element,
+                    x: element.x * scaleFactor,
+                    y: element.y * scaleFactor,
+                    width: element.width * scaleFactor,
+                    height: element.height * scaleFactor,
+                    scale: element.scale,
+                    image: element.image
+                };
+                scaledElement.draw(ctx);
+                element.selected = wasSelected;
+            });
+        }
+
+        function showNotification(message) {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                notification.style.transform = 'translateX(0)';
+            }, 100);
+            setTimeout(() => {
+                notification.style.transform = 'translateX(400px)';
+                setTimeout(() => notification.remove(), 300);
+            }, 2000);
+        }
+
+        function render() {
+            const now = performance.now();
+            if (now - lastRender < 16) return;
+            lastRender = now;
+            try {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#f1f5f9';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                elements.sort((a, b) => a.zIndex - b.zIndex).forEach(element => element.draw(ctx));
+            } catch (err) {
+                console.error('Erreur lors du rendu:', err);
+            }
+            requestAnimationFrame(render);
+        }
+
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
+
+        updateScaleDisplay(1);
+        render();
+    </script>
+</body>
+</html>
